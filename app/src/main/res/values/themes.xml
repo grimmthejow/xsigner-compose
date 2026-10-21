@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.XSigner" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.XSigner.SplashScreen" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/color_splash_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/avd_splash</item>
+        <item name="windowSplashScreenAnimationDuration">750</item>
+        <item name="postSplashScreenTheme">@style/Theme.XSigner</item>
+    </style>
+
+</resources>
