@@ -100,6 +100,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.splashscreen)
     implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.compose.animation.graphics)
 
-    debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation(libs.androidx.compose.ui.tooling)
 }

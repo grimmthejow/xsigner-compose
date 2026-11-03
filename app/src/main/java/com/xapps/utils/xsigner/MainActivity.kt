@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.xapps.utils.xsigner.pref.ProvideRuntimePrefs
 import com.xapps.utils.xsigner.ui.theme.AppTheme
 import com.xapps.utils.xsigner.ui.theme.MonetColorSwatch
 import com.xapps.utils.xsigner.ui.theme.MonetThemeController
@@ -64,36 +65,38 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            AppTheme {
-                MonetThemeHost {
-                    val tabs = remember {
-                        listOf(
-                            NavTabItem(Icons.Rounded.Home, "Home"),
-                            NavTabItem(Icons.Rounded.Key, "Keys"),
-                            NavTabItem(Icons.Rounded.Settings, "Settings")
-                        )
-                    }
-                    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-
-                    Scaffold(
-                        modifier = Modifier.fillMaxSize(),
-                        bottomBar = {
-                            ExpressiveFloatingNavBar(
-                                items = tabs,
-                                selectedIndex = selectedTab,
-                                onTabSelected = { selectedTab = it },
-                                modifier = Modifier
-                                    .navigationBarsPadding()
-                                    .padding(bottom = 12.dp),
-                                showFab = selectedTab == 1,
-                                fabStyle = FabStyle.primaryStyle(Icons.Rounded.Add, "Add"),
-                                onFabClick = { /* TODO */ }
+            ProvideRuntimePrefs {
+                AppTheme {
+                    MonetThemeHost {
+                        val tabs = remember {
+                            listOf(
+                                NavTabItem(Icons.Rounded.Home, "Home"),
+                                NavTabItem(Icons.Rounded.Key, "Keys"),
+                                NavTabItem(Icons.Rounded.Settings, "Settings")
                             )
                         }
-                    ) { innerPadding ->
-                        TypographyPreview(
-                            modifier = Modifier.padding(innerPadding)
-                        )
+                        var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+
+                        Scaffold(
+                            modifier = Modifier.fillMaxSize(),
+                            bottomBar = {
+                                ExpressiveFloatingNavBar(
+                                    items = tabs,
+                                    selectedIndex = selectedTab,
+                                    onTabSelected = { selectedTab = it },
+                                    modifier = Modifier
+                                        .navigationBarsPadding()
+                                        .padding(bottom = 12.dp),
+                                    showFab = selectedTab == 1,
+                                    fabStyle = FabStyle.primaryStyle(Icons.Rounded.Add, "Add"),
+                                    onFabClick = {}
+                                )
+                            }
+                        ) { innerPadding ->
+                            TypographyPreview(
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                        }
                     }
                 }
             }
@@ -158,7 +161,7 @@ fun TypographyPreview(modifier: Modifier = Modifier) {
             style = typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.monetRevealTrigger { controller ->
-                controller.setDarkMode(!controller.isDark)
+                controller.setThemeMode(if (controller.isDark) 1 else 2)
             }
         )
 

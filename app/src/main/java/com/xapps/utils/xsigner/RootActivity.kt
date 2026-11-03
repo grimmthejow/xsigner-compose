@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.xapps.utils.xsigner.pref.ProvideRuntimePrefs
 import com.xapps.utils.xsigner.ui.screen.RootScreen
 import com.xapps.utils.xsigner.ui.theme.AppTheme
 import com.xapps.utils.xsigner.ui.theme.MonetThemeHost
@@ -31,9 +32,11 @@ class RootActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            AppTheme {
-                MonetThemeHost {
-                    RootScreen()
+            ProvideRuntimePrefs {
+                AppTheme {
+                    MonetThemeHost {
+                        RootScreen()
+                    }
                 }
             }
         }

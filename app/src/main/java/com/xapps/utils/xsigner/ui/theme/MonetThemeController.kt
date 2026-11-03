@@ -2,6 +2,8 @@ package com.xapps.utils.xsigner.ui.theme
 
 import android.app.Activity
 import android.content.Context
+import com.xapps.utils.xsigner.pref.LocalRuntimePrefs
+import com.xapps.utils.xsigner.pref.RuntimePrefs
 import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.os.Build
@@ -13,9 +15,16 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,12 +41,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -97,13 +107,10 @@ import kotlin.math.sin
 @Suppress("unused")
 @Stable
 class MonetThemeController(
-    initialSeedColor: Color?,
-    initialDarkTheme: Boolean = true,
-    private val useDynamicColor: Boolean = true,
+    val runtimePrefs: RuntimePrefs,
+    initialSystemDark: Boolean = false,
     private val appLightScheme: ColorScheme,
     private val appDarkScheme: ColorScheme,
-    private val onSeedColorSaved: (Color?) -> Unit,
-    private val onDarkModeSaved: (Boolean) -> Unit,
     private val context: Context,
     private val scope: CoroutineScope,
     internal val compositeGraphicsLayer: GraphicsLayer
@@ -125,11 +132,33 @@ class MonetThemeController(
         val bottomRightPrimaryContainer: Color
     )
 
-    private val _seedColor = mutableStateOf(initialSeedColor)
-    val seedColor: Color? get() = _seedColor.value
+    val seedColor: Color? get() = runtimePrefs.seedColor
+    val themeMode: Int get() = runtimePrefs.themeMode
+    val isDynamicColorEnabled: Boolean get() = runtimePrefs.isDynamicColorEnabled
 
-    var isDark by mutableStateOf(initialDarkTheme)
-        private set
+    var systemIsDark by mutableStateOf(initialSystemDark)
+        internal set
+
+    val isDark: Boolean
+        get() = when (themeMode) {
+            1 -> false
+            2 -> true
+            else -> systemIsDark
+        }
+
+    internal fun evaluateDarknessChange(oldDark: Boolean) {
+        val newDark = isDark
+        if (oldDark != newDark) {
+            colorScheme = buildScheme(seedColor, newDark)
+        }
+    }
+    
+    internal fun updateSystemTheme(isSystemDark: Boolean) {
+        if (systemIsDark == isSystemDark) return
+        val oldDark = isDark
+        systemIsDark = isSystemDark
+        evaluateDarknessChange(oldDark)
+    }
 
     var isRevealing by mutableStateOf(false)
         private set
@@ -155,38 +184,46 @@ class MonetThemeController(
     val isBusy: Boolean
         get() = isRevealing || activeRevealJob?.isActive == true
 
+    fun setDynamicColorEnabled(enabled: Boolean) {
+        if (runtimePrefs.isDynamicColorEnabled == enabled) return
+        runtimePrefs.isDynamicColorEnabled = enabled
+        colorScheme = buildScheme(seedColor, isDark)
+    }
+
     private fun buildScheme(seed: Color?, dark: Boolean): ColorScheme {
+        if (!isDynamicColorEnabled) {
+            return if (dark) appDarkScheme else appLightScheme
+        }
         if (seed != null) {
             return generateMonetScheme(seed, dark)
         }
-        if (useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             return if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         return if (dark) appDarkScheme else appLightScheme
     }
 
-    var colorScheme by mutableStateOf(buildScheme(initialSeedColor, initialDarkTheme))
+    var colorScheme by mutableStateOf(buildScheme(seedColor, isDark))
         private set
 
     fun setSeedColor(newSeed: Color?) {
         if (newSeed == seedColor) return
-        _seedColor.value = newSeed
+        runtimePrefs.seedColor = newSeed
         colorScheme = buildScheme(newSeed, isDark)
-        onSeedColorSaved(newSeed)
     }
 
-    fun setDarkMode(targetDark: Boolean) {
-        if (targetDark == isDark) return
-        isDark = targetDark
-        colorScheme = buildScheme(seedColor, targetDark)
-        onDarkModeSaved(targetDark)
+    fun setThemeMode(newMode: Int) {
+        if (newMode == themeMode) return
+        val oldDark = isDark
+        runtimePrefs.themeMode = newMode
+        evaluateDarknessChange(oldDark)
     }
 
     fun selectSeedColor(
         newSeed: Color?,
         tapOriginInRoot: Offset,
         shape: RevealShape? = null,
-        durationMillis: Int = 1200
+        durationMillis: Int = 750
     ) {
         if (isBusy || newSeed == seedColor) return
         animateThemeMutation(
@@ -198,26 +235,20 @@ class MonetThemeController(
         }
     }
 
-    fun selectDarkMode(
-        targetDark: Boolean,
-        tapOriginInRoot: Offset,
+    fun selectThemeMode(
+        newMode: Int,
+        tapOriginInRoot: Offset = Offset.Zero,
         shape: RevealShape? = null,
-        durationMillis: Int = 1200
+        durationMillis: Int = 750
     ) {
-        if (isBusy || targetDark == isDark) return
-        animateThemeMutation(
-            tapOriginInRoot = tapOriginInRoot,
-            shape = shape,
-            durationMillis = durationMillis
-        ) {
-            setDarkMode(targetDark)
-        }
+        if (newMode == themeMode) return
+        setThemeMode(newMode)
     }
 
     fun animateThemeMutation(
         tapOriginInRoot: Offset,
         shape: RevealShape? = null,
-        durationMillis: Int = 1200,
+        durationMillis: Int = 750,
         mutation: () -> Unit
     ) {
         if (isBusy) return
@@ -534,7 +565,11 @@ class MonetThemeController(
             }
         }
 
-        fun generateSwatchPreview(seed: Color, isDark: Boolean = true): SwatchPreview {
+        fun generateSwatchPreview(seed: Color?, isDark: Boolean = true): SwatchPreview {
+            if (seed == null) {
+                return SwatchPreview(Color.Unspecified, Color.Unspecified, Color.Unspecified, Color.Unspecified)
+            }
+            
             val hct = FloatArray(3)
             ColorUtils.colorToM3HCT(seed.toArgb(), hct)
             val hue = hct[0]
@@ -698,25 +733,21 @@ val LocalMonetThemeController = staticCompositionLocalOf<MonetThemeController> {
 
 @Composable
 fun rememberMonetThemeController(
-    useDynamicColor: Boolean = true,
+    runtimePrefs: RuntimePrefs = LocalRuntimePrefs.current,
     appLightScheme: ColorScheme = lightScheme,
     appDarkScheme: ColorScheme = darkScheme
 ): MonetThemeController {
     val context = LocalContext.current
-    val prefs = remember(context) { ThemePreferences(context) }
     val defaultDark = isSystemInDarkTheme()
     
     val scope = rememberCoroutineScope()
     val compositeGraphicsLayer = rememberGraphicsLayer()
-    return remember(scope, compositeGraphicsLayer, prefs) {
+    return remember(scope, compositeGraphicsLayer, runtimePrefs) {
         MonetThemeController(
-            initialSeedColor = prefs.seedColor,
-            initialDarkTheme = prefs.isDarkMode(defaultDark),
-            useDynamicColor = useDynamicColor,
+            runtimePrefs = runtimePrefs,
+            initialSystemDark = defaultDark,
             appLightScheme = appLightScheme,
             appDarkScheme = appDarkScheme,
-            onSeedColorSaved = { prefs.seedColor = it },
-            onDarkModeSaved = { prefs.setDarkMode(it) },
             context = context,
             scope = scope,
             compositeGraphicsLayer = compositeGraphicsLayer
@@ -733,6 +764,24 @@ fun MonetThemeHost(
 ) {
     val view = LocalView.current
     controller.hostView = view
+    
+    val isSystemDark = isSystemInDarkTheme()
+    SideEffect {
+        controller.updateSystemTheme(isSystemDark)
+    }
+
+    val isCurrentlyDark = controller.isDark
+
+    val window = remember(view) {
+        (view.context as? Activity)?.window ?: view.context.findActivity()?.window
+    }
+    SideEffect {
+        if (window != null) {
+            val insetsController = WindowInsetsControllerCompat(window, window.decorView)
+            insetsController.isAppearanceLightStatusBars = !isCurrentlyDark
+            insetsController.isAppearanceLightNavigationBars = !isCurrentlyDark
+        }
+    }
 
     CompositionLocalProvider(LocalMonetThemeController provides controller) {
         Box(
@@ -791,11 +840,55 @@ fun MonetThemeHost(
                 }
         ) {
             MaterialTheme(
-                colorScheme = controller.colorScheme,
+                colorScheme = controller.colorScheme.animateColors(),
                 content = content
             )
         }
     }
+}
+
+@Composable
+private fun ColorScheme.animateColors(
+    animationSpec: androidx.compose.animation.core.AnimationSpec<Color> = tween(durationMillis = 500)
+): ColorScheme {
+    return copy(
+        primary = animateColorAsState(primary, animationSpec, label = "primary").value,
+        onPrimary = animateColorAsState(onPrimary, animationSpec, label = "onPrimary").value,
+        primaryContainer = animateColorAsState(primaryContainer, animationSpec, label = "primaryContainer").value,
+        onPrimaryContainer = animateColorAsState(onPrimaryContainer, animationSpec, label = "onPrimaryContainer").value,
+        secondary = animateColorAsState(secondary, animationSpec, label = "secondary").value,
+        onSecondary = animateColorAsState(onSecondary, animationSpec, label = "onSecondary").value,
+        secondaryContainer = animateColorAsState(secondaryContainer, animationSpec, label = "secondaryContainer").value,
+        onSecondaryContainer = animateColorAsState(onSecondaryContainer, animationSpec, label = "onSecondaryContainer").value,
+        tertiary = animateColorAsState(tertiary, animationSpec, label = "tertiary").value,
+        onTertiary = animateColorAsState(onTertiary, animationSpec, label = "onTertiary").value,
+        tertiaryContainer = animateColorAsState(tertiaryContainer, animationSpec, label = "tertiaryContainer").value,
+        onTertiaryContainer = animateColorAsState(onTertiaryContainer, animationSpec, label = "onTertiaryContainer").value,
+        error = animateColorAsState(error, animationSpec, label = "error").value,
+        onError = animateColorAsState(onError, animationSpec, label = "onError").value,
+        errorContainer = animateColorAsState(errorContainer, animationSpec, label = "errorContainer").value,
+        onErrorContainer = animateColorAsState(onErrorContainer, animationSpec, label = "onErrorContainer").value,
+        background = animateColorAsState(background, animationSpec, label = "background").value,
+        onBackground = animateColorAsState(onBackground, animationSpec, label = "onBackground").value,
+        surface = animateColorAsState(surface, animationSpec, label = "surface").value,
+        onSurface = animateColorAsState(onSurface, animationSpec, label = "onSurface").value,
+        surfaceVariant = animateColorAsState(surfaceVariant, animationSpec, label = "surfaceVariant").value,
+        onSurfaceVariant = animateColorAsState(onSurfaceVariant, animationSpec, label = "onSurfaceVariant").value,
+        outline = animateColorAsState(outline, animationSpec, label = "outline").value,
+        outlineVariant = animateColorAsState(outlineVariant, animationSpec, label = "outlineVariant").value,
+        scrim = animateColorAsState(scrim, animationSpec, label = "scrim").value,
+        inverseSurface = animateColorAsState(inverseSurface, animationSpec, label = "inverseSurface").value,
+        inverseOnSurface = animateColorAsState(inverseOnSurface, animationSpec, label = "inverseOnSurface").value,
+        inversePrimary = animateColorAsState(inversePrimary, animationSpec, label = "inversePrimary").value,
+        surfaceDim = animateColorAsState(surfaceDim, animationSpec, label = "surfaceDim").value,
+        surfaceBright = animateColorAsState(surfaceBright, animationSpec, label = "surfaceBright").value,
+        surfaceContainerLowest = animateColorAsState(surfaceContainerLowest, animationSpec, label = "surfaceContainerLowest").value,
+        surfaceContainerLow = animateColorAsState(surfaceContainerLow, animationSpec, label = "surfaceContainerLow").value,
+        surfaceContainer = animateColorAsState(surfaceContainer, animationSpec, label = "surfaceContainer").value,
+        surfaceContainerHigh = animateColorAsState(surfaceContainerHigh, animationSpec, label = "surfaceContainerHigh").value,
+        surfaceContainerHighest = animateColorAsState(surfaceContainerHighest, animationSpec, label = "surfaceContainerHighest").value,
+        surfaceTint = animateColorAsState(surfaceTint, animationSpec, label = "surfaceTint").value
+    )
 }
 
 @Suppress("unused")
@@ -835,11 +928,42 @@ fun MonetColorSwatch(
     shapeOverride: MonetThemeController.RevealShape? = null
 ) {
     val controller = LocalMonetThemeController.current
+    val context = LocalContext.current
     val isSelected = controller.seedColor == seedColor
-    val preview = remember(seedColor, controller.isDark) {
-        if (seedColor == null) null
-        else MonetThemeController.generateSwatchPreview(seedColor, controller.isDark)
+    
+    val targetPreview = remember(seedColor, controller.isDark, context) {
+        if (seedColor == null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val scheme = if (controller.isDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+                MonetThemeController.SwatchPreview(
+                    topLeftPrimary = scheme.primary,
+                    topRightSecondaryContainer = scheme.secondaryContainer,
+                    bottomLeftTertiaryContainer = scheme.tertiaryContainer,
+                    bottomRightPrimaryContainer = scheme.primaryContainer
+                )
+            } else {
+                MonetThemeController.generateSwatchPreview(Color(0xFF6750A4), controller.isDark)
+            }
+        } else {
+            MonetThemeController.generateSwatchPreview(seedColor, controller.isDark)
+        }
     }
+
+    val colorAnimSpec = tween<Color>(durationMillis = 350)
+    val animTopLeft by animateColorAsState(targetValue = targetPreview.topLeftPrimary, animationSpec = colorAnimSpec, label = "swatchTopLeft")
+    val animTopRight by animateColorAsState(targetValue = targetPreview.topRightSecondaryContainer, animationSpec = colorAnimSpec, label = "swatchTopRight")
+    val animBottomLeft by animateColorAsState(targetValue = targetPreview.bottomLeftTertiaryContainer, animationSpec = colorAnimSpec, label = "swatchBottomLeft")
+    val animBottomRight by animateColorAsState(targetValue = targetPreview.bottomRightPrimaryContainer, animationSpec = colorAnimSpec, label = "swatchBottomRight")
+
+    val borderWidth by animateDpAsState(
+        targetValue = if (isSelected) 2.5.dp else 0.dp,
+        animationSpec = tween(durationMillis = 150),
+        label = "swatchBorderWidth"
+    )
+
+    val borderColor = MaterialTheme.colorScheme.primary
+    val checkContainerColor = MaterialTheme.colorScheme.primaryContainer
+    val checkColor = MaterialTheme.colorScheme.onPrimaryContainer
 
     var swatchPositionInRoot by remember { mutableStateOf(Offset.Zero) }
 
@@ -848,10 +972,10 @@ fun MonetColorSwatch(
             .size(size)
             .clip(RoundedCornerShape(cornerRadius))
             .then(
-                if (isSelected) {
+                if (borderWidth > 0.dp) {
                     Modifier.border(
-                        width = 2.5.dp,
-                        color = MaterialTheme.colorScheme.primary,
+                        width = borderWidth,
+                        color = borderColor,
                         shape = RoundedCornerShape(cornerRadius)
                     )
                 } else {
@@ -873,60 +997,48 @@ fun MonetColorSwatch(
                 }
             }
     ) {
-        if (preview == null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Text(
-                    text = "A",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.Center)
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(modifier = Modifier.weight(1f)) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(animTopLeft)
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(animTopRight)
                 )
             }
-        } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.weight(1f)) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .background(preview.topLeftPrimary)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .background(preview.topRightSecondaryContainer)
-                    )
-                }
-                Row(modifier = Modifier.weight(1f)) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .background(preview.bottomLeftTertiaryContainer)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .background(preview.bottomRightPrimaryContainer)
-                    )
-                }
+            Row(modifier = Modifier.weight(1f)) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(animBottomLeft)
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(animBottomRight)
+                )
             }
         }
 
-        if (isSelected) {
-            val checkColor = MaterialTheme.colorScheme.onPrimaryContainer
+        AnimatedVisibility(
+            visible = isSelected,
+            modifier = Modifier.align(Alignment.Center),
+            enter = fadeIn(animationSpec = tween(200)) + scaleIn(animationSpec = tween(200), initialScale = 0.6f),
+            exit = fadeOut(animationSpec = tween(150)) + scaleOut(animationSpec = tween(150), targetScale = 0.6f)
+        ) {
             Box(
                 modifier = Modifier
                     .size(22.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .align(Alignment.Center),
+                    .background(checkContainerColor),
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(modifier = Modifier.size(12.dp)) {
